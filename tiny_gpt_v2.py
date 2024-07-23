@@ -57,11 +57,14 @@ eval_dataloader = DataLoader(eval_dataset, batch_size=Config.BATCH_SIZE, shuffle
 model = TinyGPT(
     num_embeddings=len(tokenizer.vocabulary),
     embedding_dim=Config.EMB_DIM,
+    sequence_length=Config.SEQUENCE_LEN,
     att_blocks=Config.ATT_BLOCKS,
     multi_head_count=Config.HC,
+    dropout=Config.DROPOUT,
     device=device,
 )
 model = model.to(device=device)
+print(f"model parameters: {model.get_num_params()}")
 
 # x = torch.randint(low=0, high=len(tokenizer.vocabulary)-1, size = (BATCH_SIZE, T))
 # pred, loss = model(x)
@@ -72,6 +75,7 @@ model.generate(tokenizer=tokenizer, max_len=500, device=device)
 
 # Model Training
 print(model)
+min_eval_loss = float("inf")
 with SummaryWriter() as writer:
     # Viz model
     viz_model(model=model, eval_dataloader=eval_dataloader, writer=writer)
@@ -87,6 +91,21 @@ with SummaryWriter() as writer:
         eval_step_interval=200,
     )
     writer.flush()
+
+    if eval_loss < min_eval_loss:
+        # update the running min eval loss
+        min_eval_loss = eval_loss
+
+        # save best model
+        model_path = "tiny_gpy_best_.chkpt"
+        save_model(
+            model_path=model_path,
+            model=model,
+            optimizer=opt,
+            epoch=Config.EPOCHS,
+            train_loss=train_loss,
+            eval_loss=eval_loss,
+        )
 
     # Post model Training
     model.generate(tokenizer=tokenizer, max_len=500, device=device)

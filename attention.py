@@ -4,6 +4,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+import math
 
 """
  Attention Module
@@ -36,12 +37,13 @@ def apply_causal_mask(x: torch.Tensor) -> torch.Tensor:
 
 
 class SingleHeadSelfAttention(nn.Module):
-    def __init__(self, emb: int, hs: int):
+    def __init__(self, emb: int, hs: int, dropout: float):
         super().__init__()
         self.hs = hs
         self.key = nn.Linear(emb, hs)
         self.query = nn.Linear(emb, hs)
         self.val = nn.Linear(emb, hs)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         # x: (B, T, Emb)
@@ -49,15 +51,16 @@ class SingleHeadSelfAttention(nn.Module):
         query = self.query(x)  # (B, T, HS)
         val = self.val(x)  # (B, T, HS)
 
-        attention = key @ query.transpose(
-            -2, -1
+        attention = (
+            key @ query.transpose(-2, -1) * (1.0 / math.sqrt(key.size(-1)))
         )  # (B, T, HS) @ (B, HS, T) -> (B, T, T)
         wei = apply_causal_mask(attention)  # (B, T, T)
+        wei = self.dropout(wei)
         return wei @ val  # (B, T, HS)
 
 
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, emb: int, hc: int):
+    def __init__(self, emb: int, hc: int, dropout: float):
         """
         - emb: embendding length
         - hc: head count
@@ -69,7 +72,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.hc = hc
         self.hs = emb // hc
         self.attention_heads = nn.ModuleList(
-            [SingleHeadSelfAttention(emb, self.hs) for _ in range(self.hc)]
+            [SingleHeadSelfAttention(emb, self.hs, dropout) for _ in range(self.hc)]
         )
 
     def forward(self, x: torch.tensor) -> torch.tensor:
@@ -84,22 +87,27 @@ class MultiHeadSelfAttention(nn.Module):
 
 
 class SelfAttentionBlck(nn.Module):
-    def __init__(self, emb: int, hc: int):
+    def __init__(self, emb: int, hc: int, dropout: float):
         super().__init__()
         self.emb = emb
         self.hc = hc
-        self.normal = nn.LayerNorm((emb))
+        self.normal1 = nn.LayerNorm((emb))
+        self.normal2 = nn.LayerNorm((emb))
 
-        self.mult_head_att = MultiHeadSelfAttention(emb=emb, hc=hc)
-        self.act = nn.ReLU()
+        self.mult_head_att = MultiHeadSelfAttention(emb=emb, hc=hc, dropout=dropout)
+
+        # MLP
+        self.mlp = nn.Sequential(
+            nn.Linear(emb, 4 * emb, bias=True),
+            nn.GELU(),
+            nn.Linear(4 * emb, emb, bias=True),
+            nn.Dropout(dropout),
+        )
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         """
         x: (B, T, Emb)
         """
-        x_copy = x.clone()
-        x = self.normal(x)
-        x = self.mult_head_att(x)
-        x = x + x_copy
-        x = self.act(x)
+        x = x + self.mult_head_att(self.normal1(x))
+        x = x + self.mlp(self.normal2(x))
         return x

@@ -59,7 +59,7 @@ def viz_model(model: nn.Module, eval_dataloader: DataLoader, writer: SummaryWrit
 def get_prefered_device():
     if torch.cuda.is_available():
         device = torch.device("cuda")
-    if torch.backends.mps.is_available() or torch.backends.mps.is_built():
+    elif torch.backends.mps.is_available() or torch.backends.mps.is_built():
         device = torch.device("mps")
     else:
         device = torch.device("cpu")

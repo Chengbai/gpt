@@ -39,32 +39,74 @@ class TinyGPT(nn.Module):
         self,
         num_embeddings: int,
         embedding_dim: int,
+        sequence_length: int,
         att_blocks: int,
         multi_head_count: int,
+        dropout: float,
         device: torch.device = torch.device("cpu"),
     ):
         assert num_embeddings > 0
         assert embedding_dim > 0
+        assert sequence_length > 0
         assert att_blocks > 0
         assert multi_head_count > 0
         assert device is not None
 
         super().__init__()
-        self.embeddings = nn.Embedding(
+        # token embeddings
+        self.token_embeddings = nn.Embedding(
             num_embeddings=num_embeddings,
             embedding_dim=embedding_dim,  # device=device
         )
+        # position embeddings
+        self.position_embeddings = nn.Embedding(
+            num_embeddings=sequence_length,
+            embedding_dim=embedding_dim,  # device=device
+        )
+        self.sequence_length = sequence_length
+        self.dropout = nn.Dropout(dropout)
         self.backbone = nn.Sequential(
             *[
-                SelfAttentionBlck(emb=embedding_dim, hc=multi_head_count)
+                SelfAttentionBlck(
+                    emb=embedding_dim, hc=multi_head_count, dropout=dropout
+                )
                 for _ in range(att_blocks)
             ]
         )
-        self.linear1 = nn.Linear(embedding_dim, 1024)
-        self.act1 = nn.ReLU()
-        self.linear2 = nn.Linear(1024, num_embeddings)
+        self.lm_head = nn.Linear(embedding_dim, num_embeddings, bias=False)
 
-        self.loss_func = nn.NLLLoss()
+        # with weight tying when using torch.compile() some warnings get generated:
+        # "UserWarning: functional_call was passed multiple values for tied weights.
+        # This behavior is deprecated and will be an error in future versions"
+        # not 100% sure what this is, so far seems to be harmless. TODO investigate
+        self.token_embeddings.weight = (
+            self.lm_head.weight
+        )  # https://paperswithcode.com/method/weight-tying
+
+        self.apply(self._init_weights)
+
+        # report number of parameters
+        print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
+
+    def get_num_params(self, non_embedding=True):
+        """
+        Return the number of parameters in the model.
+        For non-embedding count (default), the position embeddings get subtracted.
+        The token embeddings would too, except due to the parameter sharing these
+        params are actually used as weights in the final layer, so we include them.
+        """
+        n_params = sum(p.numel() for p in self.parameters())
+        if non_embedding:
+            n_params -= self.position_embeddings.weight.numel()
+        return n_params
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     @property
     def device(self):
@@ -74,19 +116,18 @@ class TinyGPT(nn.Module):
         """
         x: (B, T)
         """
-        x = self.embeddings(x)  # (B, T) -> (B, T, Emb)
+        B, T = x.size()
+        token_emb = self.token_embeddings(x)  # (B, T) -> (B, T, Emb)
+        pos = torch.arange(0, T, dtype=torch.long, device=self.device)  # shape (t)
+        pos_emb = self.position_embeddings(pos)  # position embeddings of shape (T, Emb)
+        pos_emb = torch.unsqueeze(pos_emb, dim=0)
+        x = self.dropout(token_emb + pos_emb)
         x = self.backbone(x)  # (B, T, Emb) -> (B, T, Emb)
-        x = self.linear1(x)  # (B, T, Emb) -> (B, T, 1024)
-        x = self.act1(x)  # (B, T, 1024) -> (B, T, 1024)
-        x = self.linear2(x)  # (B, T, 1024) -> (B, T, num_embeddings)
+        x = self.lm_head(x)  # (B, T, Emb) -> (B, T, 1024)
 
         if y is None:
             loss = None
         else:
-            # x = F.softmax(x, dim=-1)
-            # print(f"x: {x.size()}")
-            # print(f"y: {y.size()}")
-            # loss = self.loss_func(x[:, -1, :], y)
             loss = F.cross_entropy(x[:, -1, :], y)
 
         return x, loss
@@ -144,7 +185,7 @@ class TinyGPT(nn.Module):
                             global_step=global_step,
                         )
                         self.generate(
-                            tokenizer=tokenizer, max_len=500, device=self.device
+                            tokenizer=tokenizer, max_len=100, device=self.device
                         )
 
                     opt.zero_grad()
@@ -174,6 +215,11 @@ class TinyGPT(nn.Module):
         for idx, batch_data in tqdm(
             enumerate(eval_dataloader), total=len(eval_dataloader)
         ):
+            import random
+
+            if random.random() > 0.1:
+                continue
+
             x_batch, y_batch = batch_data
             # print(x_batch.size(), y_batch.size())
             _, loss = self(x=x_batch, y=y_batch)
@@ -192,13 +238,15 @@ class TinyGPT(nn.Module):
         self.eval()
 
         pred = []
-        context = torch.randint(
-            low=0,
-            high=len(tokenizer.vocabulary) - 1,
-            size=(1, Config.SEQUENCE_LEN),
-            device=device,
-        )
-        for _ in range(max_len):
+        # context = torch.randint(
+        #     low=0,
+        #     high=len(tokenizer.vocabulary) - 1,
+        #     size=(1, Config.SEQUENCE_LEN),
+        #     device=device,
+        # )
+        start = "\n"
+        context = torch.unsqueeze(tokenizer.encode(start), dim=0)
+        for _ in tqdm(range(max_len)):
             x, _ = self(context[:, -Config.SEQUENCE_LEN :])  # x: (1, T, Emb)
             prob = F.softmax(x[0], dim=1)  # prob: (T, Emb)
             # print(f"prob: {prob.size()}")

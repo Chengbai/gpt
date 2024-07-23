@@ -1,8 +1,9 @@
 import torch
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
 
-# from torch.utils.tensorboard import SummaryWriter
+# from tensorboardX import SummaryWriter
+
+from torch.utils.tensorboard import SummaryWriter
 
 import random
 import numpy as np
@@ -57,24 +58,29 @@ eval_dataloader = DataLoader(eval_dataset, batch_size=Config.BATCH_SIZE, shuffle
 model = TinyGPT(
     num_embeddings=len(c_tokenizer.vocabulary),
     embedding_dim=Config.EMB_DIM,
+    sequence_length=Config.SEQUENCE_LEN,
     att_blocks=Config.ATT_BLOCKS,
     multi_head_count=Config.HC,
+    dropout=Config.DROPOUT,
     device=device,
 )
 model = model.to(device=device)
-
+print(f"model parameters: {model.get_num_params(non_embedding=False)}")
+model = torch.compile(model)
 # x = torch.randint(low=0, high=len(c_tokenizer.vocabulary)-1, size = (BATCH_SIZE, T))
 # pred, loss = model(x)
 # print(pred.size(), pred[0][0])
 
 # Before Model Training
-model.generate(tokenizer=c_tokenizer, max_len=500, device=device)
+model.generate(tokenizer=c_tokenizer, max_len=100, device=device)
 
 # Model Training
 print(model)
+
+min_eval_loss = float("inf")
 with SummaryWriter() as writer:
     # Viz model
-    viz_model(model=model, eval_dataloader=eval_dataloader, writer=writer)
+    # viz_model(model=model, eval_dataloader=eval_dataloader, writer=writer)
 
     # Train model
     opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
@@ -88,9 +94,24 @@ with SummaryWriter() as writer:
     )
     writer.flush()
 
+    if eval_loss < min_eval_loss:
+        # update the running min eval loss
+        min_eval_loss = eval_loss
+
+        # save best model
+        model_path = "tiny_gpy_best_.chkpt"
+        save_model(
+            model_path=model_path,
+            model=model,
+            optimizer=opt,
+            epoch=Config.EPOCHS,
+            train_loss=train_loss,
+            eval_loss=eval_loss,
+        )
+
     # Post model Training
-    model.generate(tokenizer=c_tokenizer, max_len=500, device=device)
-    model_path = f"tiny_gpy_final_{datetime.now().strftime('%m_%d_%Y_%H_%M_%S').chkpt}"
+    model.generate(tokenizer=c_tokenizer, max_len=100, device=device)
+    model_path = f"tiny_gpy_final_{datetime.now().strftime('%m_%d_%Y_%H_%M_%S')}.chkpt"
     eval_loss = model.eval_model(eval_dataloader=eval_dataloader)
     save_model(
         model_path=model_path,
