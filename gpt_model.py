@@ -6,6 +6,8 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
+import inspect
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from tqdm import tqdm
 from typing import Tuple
@@ -13,7 +15,7 @@ from typing import Tuple
 from attention import SelfAttentionBlck
 from config import Config
 from tokenizer import BaseTokenizer
-from utils import save_model
+from utils import save_model, get_lr
 
 
 class TinyGPT(nn.Module):
@@ -68,7 +70,7 @@ class TinyGPT(nn.Module):
         self.backbone = nn.Sequential(
             *[
                 SelfAttentionBlck(
-                    emb=embedding_dim, hc=multi_head_count, dropout=dropout
+                    emb=embedding_dim, heads=multi_head_count, dropout=dropout
                 )
                 for _ in range(att_blocks)
             ]
@@ -120,33 +122,51 @@ class TinyGPT(nn.Module):
         token_emb = self.token_embeddings(x)  # (B, T) -> (B, T, Emb)
         pos = torch.arange(0, T, dtype=torch.long, device=self.device)  # shape (t)
         pos_emb = self.position_embeddings(pos)  # position embeddings of shape (T, Emb)
-        pos_emb = torch.unsqueeze(pos_emb, dim=0)
+        pos_emb = torch.unsqueeze(pos_emb, dim=0)  # (1, T, Emb)
         x = self.dropout(token_emb + pos_emb)
         x = self.backbone(x)  # (B, T, Emb) -> (B, T, Emb)
-        x = self.lm_head(x)  # (B, T, Emb) -> (B, T, 1024)
+        x = self.lm_head(x)  # (B, T, Emb) -> (B, T, VOCAB)
 
         if y is None:
             loss = None
         else:
-            loss = F.cross_entropy(x[:, -1, :], y)
+            # loss = F.cross_entropy(x[:, -1, :], y)
+            loss = F.cross_entropy(x.view(-1, x.size(-1)), y.view(-1), ignore_index=-1)
 
         return x, loss
+
+    def get_amp_context(self):
+        dtype = "bfloat16"
+        ptdtype = {
+            "float32": torch.float32,
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+        }[dtype]
+
+        return nullcontext()
+        # ctx = (
+        #     nullcontext()
+        #     if self.device == "cpu"
+        #     else torch.amp.autocast(device_type=self.device, dtype=ptdtype)
+        # )
+        # return ctx
 
     def train_model(
         self,
         tokenizer: BaseTokenizer,
-        opt: torch.optim.Optimizer,
+        optimizer: torch.optim.Optimizer,
         train_dataloader: DataLoader,
         eval_dataloader: DataLoader,
         writer: SummaryWriter,
         eval_step_interval: int = 1_000,
     ) -> Tuple[torch.tensor, torch.tensor]:
         assert tokenizer is not None
-        assert opt is not None
+        assert optimizer is not None
         assert train_dataloader is not None
         assert eval_dataloader is not None
         assert writer is not None
 
+        amp_context = self.get_amp_context()
         print(f"steps per Epoch: {len(train_dataloader)}")
         with torch.profiler.profile(
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
@@ -161,9 +181,15 @@ class TinyGPT(nn.Module):
                     enumerate(train_dataloader), total=len(train_dataloader)
                 ):
                     prof.step()
+
+                    lr = get_lr(idx)
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = lr
+
                     x_batch, y_batch = batch_data
                     # print(x_batch.size(), y_batch.size())
-                    _, train_loss = self(x=x_batch, y=y_batch)
+                    with amp_context:
+                        _, train_loss = self(x=x_batch, y=y_batch)
 
                     if idx % eval_step_interval == 0:
                         eval_loss = self.eval_model(eval_dataloader=eval_dataloader)
@@ -188,9 +214,9 @@ class TinyGPT(nn.Module):
                             tokenizer=tokenizer, max_len=100, device=self.device
                         )
 
-                    opt.zero_grad()
+                    optimizer.zero_grad()
                     train_loss.backward()
-                    opt.step()
+                    optimizer.step()
                     global_step += 1
 
                 # Save epoch model
@@ -198,7 +224,7 @@ class TinyGPT(nn.Module):
                 save_model(
                     model_path=model_path,
                     model=self,
-                    optimizer=opt,
+                    optimizer=optimizer,
                     epoch=epoch,
                     train_loss=train_loss,
                     eval_loss=eval_loss,
@@ -206,9 +232,43 @@ class TinyGPT(nn.Module):
 
         return train_loss, eval_loss
 
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+        # start with all of the candidate parameters
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        # filter out those that do not require grad
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": nodecay_params, "weight_decay": 0.0},
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(
+            f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters"
+        )
+        print(
+            f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters"
+        )
+        # Create AdamW optimizer and use the fused version if it is available
+        fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and device_type == "mps"  # "cuda"
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(
+            optim_groups, lr=learning_rate, betas=betas, **extra_args
+        )
+        print(f"using fused AdamW: {use_fused}")
+
+        return optimizer
+
     @torch.no_grad()
     def eval_model(self, eval_dataloader) -> torch.tensor:
         assert eval_dataloader is not None
+
+        amp_context = self.get_amp_context()
 
         self.eval()
         losses = []
@@ -222,7 +282,8 @@ class TinyGPT(nn.Module):
 
             x_batch, y_batch = batch_data
             # print(x_batch.size(), y_batch.size())
-            _, loss = self(x=x_batch, y=y_batch)
+            with amp_context:
+                _, loss = self(x=x_batch, y=y_batch)
             losses.append(loss)
         avg_loss = torch.mean(torch.tensor(losses))
         self.train()
@@ -230,7 +291,12 @@ class TinyGPT(nn.Module):
 
     @torch.no_grad()
     def generate(
-        self, tokenizer: BaseTokenizer, max_len: int, device: torch.device
+        self,
+        tokenizer: BaseTokenizer,
+        max_len: int,
+        device: torch.device,
+        temperature: float = 1.0,
+        top_k: int = None,
     ) -> str:
         assert tokenizer is not None
         assert max_len > 0
@@ -247,11 +313,20 @@ class TinyGPT(nn.Module):
         start = "\n"
         context = torch.unsqueeze(tokenizer.encode(start), dim=0)
         for _ in tqdm(range(max_len)):
-            x, _ = self(context[:, -Config.SEQUENCE_LEN :])  # x: (1, T, Emb)
-            prob = F.softmax(x[0], dim=1)  # prob: (T, Emb)
+            logits, _ = self(
+                context[:, -Config.SEQUENCE_LEN :]
+            )  # logits: (1, t, VOCAB)
+            logits = (
+                logits[:, -1, :] / temperature
+            )  # logits : (1, VOCAB) and is the last one in the sequence
+            if top_k:
+                v, _ = torch.topk(logits, min(top_k, logits.size()[-1]))
+                logits[logits < v[:, -1]] = -float("inf")  # (1, VOCAB)
+
+            prob = F.softmax(logits, dim=-1)  # prob: (1, VOCAB)
             # print(f"prob: {prob.size()}")
-            predict_encod = torch.multinomial(prob[-1], num_samples=1)
-            context = torch.cat([context, torch.unsqueeze(predict_encod, 0)], dim=1)
+            predict_encod = torch.multinomial(prob, num_samples=1)  # (1, 1)
+            context = torch.cat([context, predict_encod], dim=1)
             # print(f"predict_encod: {predict_encod}")
 
             pred.append(int(predict_encod))

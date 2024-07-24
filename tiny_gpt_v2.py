@@ -70,9 +70,16 @@ print(f"model parameters: {model.get_num_params()}")
 # pred, loss = model(x)
 # print(pred.size(), pred[0][0])
 
-# Before Model Training
-model.generate(tokenizer=tokenizer, max_len=500, device=device)
+# optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+optimizer = model.configure_optimizers(
+    Config.WEIGHT_DECAY, Config.LEARNING_RATE, (Config.BETA1, Config.BETA2), device
+)
 
+
+# Before Model Training
+model.generate(
+    tokenizer=tokenizer, max_len=100, device=device, temperature=0.8, top_k=200
+)
 # Model Training
 print(model)
 min_eval_loss = float("inf")
@@ -81,10 +88,10 @@ with SummaryWriter() as writer:
     viz_model(model=model, eval_dataloader=eval_dataloader, writer=writer)
 
     # Train model
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     train_loss, eval_loss = model.train_model(
         tokenizer=tokenizer,
-        opt=opt,
+        optimizer=optimizer,
         train_dataloader=train_dataloader,
         eval_dataloader=eval_dataloader,
         writer=writer,
@@ -101,7 +108,7 @@ with SummaryWriter() as writer:
         save_model(
             model_path=model_path,
             model=model,
-            optimizer=opt,
+            optimizer=optimizer,
             epoch=Config.EPOCHS,
             train_loss=train_loss,
             eval_loss=eval_loss,
@@ -114,7 +121,7 @@ with SummaryWriter() as writer:
     save_model(
         model_path=model_path,
         model=model,
-        optimizer=opt,
+        optimizer=optimizer,
         epoch=Config.EPOCHS,
         train_loss=train_loss,
         eval_loss=eval_loss,

@@ -5,6 +5,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
+import math
 from pathlib import Path
 from config import Config
 from typing import List
@@ -64,3 +65,20 @@ def get_prefered_device():
     else:
         device = torch.device("cpu")
     return device
+
+
+# learning rate decay scheduler (cosine with warmup)
+def get_lr(it: int):
+    # 1) linear warmup for warmup_iters steps
+    if it < Config.WARMUP_ITERS:
+        return Config.LEARNING_RATE * it / Config.WARMUP_ITERS
+    # 2) if it > lr_decay_iters, return min learning rate
+    if it > Config.LR_DECAY_ITERS:
+        return Config.MIN_LR
+    # 3) in between, use cosine decay down to min learning rate
+    decay_ratio = (it - Config.WARMUP_ITERS) / (
+        Config.LR_DECAY_ITERS - Config.WARMUP_ITERS
+    )
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
+    return Config.MIN_LR + coeff * (Config.LEARNING_RATE - Config.MIN_LR)

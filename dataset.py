@@ -32,5 +32,5 @@ class TSDataset(Dataset):
         ), f"tokens: {len(tokens)}, expected length: {self.sequence_len+1}"
 
         x = tokens[:-1]
-        y = tokens[-1]
+        y = tokens[1:]
         return x, y
