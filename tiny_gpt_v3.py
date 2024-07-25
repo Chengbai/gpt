@@ -31,7 +31,7 @@ def run():
     device = get_prefered_device()
 
     # Load txt
-    root_dir = "/Users/chengbai/av/"
+    root_dir = "/Users/test/"
     data_source = DirectoryTxtDataSource(
         dir_path=root_dir, file_patterns=Config.FILE_PATTERNS
     )
