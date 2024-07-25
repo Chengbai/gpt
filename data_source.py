@@ -1,7 +1,9 @@
 # Date: 2024-07-24
 # Cheng Bai
 
+from datetime import datetime, timezone
 from pathlib import Path
+from tqdm import tqdm
 from typing import List, Union
 
 from utils import load_text_from_file
@@ -29,6 +31,11 @@ class FileTxtDataSource(BaseTxtDataSource):
     def txt(self):
         return self.content
 
+    @staticmethod
+    def save(file_path: Union[str, Path], txt):
+        with open(file_path, "w") as f:
+            f.write(txt)
+
 
 class DirectoryTxtDataSource(BaseTxtDataSource):
     def __init__(
@@ -42,21 +49,24 @@ class DirectoryTxtDataSource(BaseTxtDataSource):
         assert dir_path is not None
         assert file_patterns
 
-        self.dir_path = Path(dir_path)
-        assert self.dir_path.is_dir()
+        if cache_file and Path(cache_file).exists():
+            self.content = FileTxtDataSource(cache_file).txt
+        else:
+            self.dir_path = Path(dir_path)
+            assert self.dir_path.is_dir()
 
-        self.file_patterns = file_patterns
-        pattern_txts = []
-        for file_pattern in file_patterns:
-            txt = "\n".join(
-                [
-                    FileTxtDataSource(file_path).txt
-                    for file_path in self.dir_path.rglob(file_pattern)
-                ]
+            self.file_patterns = file_patterns
+            pattern_txts = []
+            for file_pattern in file_patterns:
+                for file_path in tqdm(list(self.dir_path.rglob(file_pattern))):
+                    pattern_txts.append(FileTxtDataSource(file_path).txt)
+
+            self.content = "\n".join(pattern_txts)
+            cache_file = (
+                f"dir_txt_cache_{datetime.now(timezone.utc).strftime('%Y_%m_%d')}.txt"
             )
-            pattern_txts.extend(txt)
-
-        self.content = "\n".join(self.pattern_txts)
+            FileTxtDataSource.save(cache_file, self.content)
+            print(f"Cache the director txt into file: {cache_file}")
 
     @property
     def txt(self):

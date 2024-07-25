@@ -22,6 +22,13 @@ class Config:
     LEARNING_RATE = 6e-4
     MIN_LR = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 
+    FILE_PATTERNS = ["*.py", "*.cc", "*.hh"]
+
+    GEN_SEQUENCE_LENGTH = 200
+
+    EVAL_STEP_INTERVAL = 500
+    EVAL_SEQUENCE_LENGTH = 200
+
 
 class GPTConfig:
     block_size: int = 1024

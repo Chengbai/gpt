@@ -211,7 +211,9 @@ class TinyGPT(nn.Module):
                             global_step=global_step,
                         )
                         self.generate(
-                            tokenizer=tokenizer, max_len=100, device=self.device
+                            tokenizer=tokenizer,
+                            max_len=Config.GEN_SEQUENCE_LENGTH,
+                            device=self.device,
                         )
 
                     optimizer.zero_grad()
@@ -275,10 +277,8 @@ class TinyGPT(nn.Module):
         for idx, batch_data in tqdm(
             enumerate(eval_dataloader), total=len(eval_dataloader)
         ):
-            import random
-
-            if random.random() > 0.1:
-                continue
+            if idx > Config.EVAL_SEQUENCE_LENGTH:
+                break
 
             x_batch, y_batch = batch_data
             # print(x_batch.size(), y_batch.size())
