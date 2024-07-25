@@ -12,6 +12,7 @@ from pathlib import Path
 # Following modules are in this code base.
 from config import Config
 from dataset import TSDataset
+from data_source import FileTxtDataSource
 from gpt_model import TinyGPT
 from tokenizer import Tiktoken
 from utils import load_text_from_file, get_prefered_device, save_model, viz_model
@@ -24,9 +25,10 @@ torch.manual_seed(0)
 device = get_prefered_device()
 
 
-# Load .txt
+# Load txt
 tinyshakespear_file = Path("tinyshakespeare.txt")
-tinyshakespeare_text = load_text_from_file(tinyshakespear_file)
+data_source = FileTxtDataSource(tinyshakespear_file)
+tinyshakespeare_text = data_source.txt
 len(tinyshakespeare_text), tinyshakespeare_text[:50]
 
 # Create Tokenizer
