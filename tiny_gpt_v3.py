@@ -31,7 +31,7 @@ def run():
     device = get_prefered_device()
 
     # Load txt
-    root_dir = "/Users/test/"
+    root_dir = "/Users/chengbai/av"
     data_source = DirectoryTxtDataSource(
         dir_path=root_dir, file_patterns=Config.FILE_PATTERNS
     )
@@ -68,6 +68,7 @@ def run():
 
     # Model
     model = TinyGPT(
+        version="v3",
         num_embeddings=len(tokenizer.vocabulary),
         embedding_dim=Config.EMB_DIM,
         sequence_length=Config.SEQUENCE_LEN,
@@ -99,7 +100,6 @@ def run():
     # Model Training
     print(model)
 
-    min_eval_loss = float("inf")
     with SummaryWriter() as writer:
         # Viz model
         # viz_model(model=model, eval_dataloader=eval_dataloader, writer=writer)
@@ -115,21 +115,6 @@ def run():
         )
         writer.flush()
 
-        if eval_loss < min_eval_loss:
-            # update the running min eval loss
-            min_eval_loss = eval_loss
-
-            # save best model
-            model_path = "tiny_gpy_best_.chkpt"
-            save_model(
-                model_path=model_path,
-                model=model,
-                optimizer=optimizer,
-                epoch=Config.EPOCHS,
-                train_loss=train_loss,
-                eval_loss=eval_loss,
-            )
-
         # Post model Training
         model.generate(
             tokenizer=tokenizer, max_len=Config.GEN_SEQUENCE_LENGTH, device=device
@@ -139,10 +124,12 @@ def run():
         )
         eval_loss = model.eval_model(eval_dataloader=eval_dataloader)
         save_model(
+            version="v3",
             model_path=model_path,
             model=model,
             optimizer=optimizer,
             epoch=Config.EPOCHS,
+            global_step=-1,  # last step
             train_loss=train_loss,
             eval_loss=eval_loss,
         )

@@ -57,6 +57,7 @@ eval_dataloader = DataLoader(eval_dataset, batch_size=Config.BATCH_SIZE, shuffle
 
 # Model
 model = TinyGPT(
+    version="v2",
     num_embeddings=len(tokenizer.vocabulary),
     embedding_dim=Config.EMB_DIM,
     sequence_length=Config.SEQUENCE_LEN,
@@ -84,7 +85,6 @@ model.generate(
 )
 # Model Training
 print(model)
-min_eval_loss = float("inf")
 with SummaryWriter() as writer:
     # Viz model
     viz_model(model=model, eval_dataloader=eval_dataloader, writer=writer)
@@ -101,29 +101,16 @@ with SummaryWriter() as writer:
     )
     writer.flush()
 
-    if eval_loss < min_eval_loss:
-        # update the running min eval loss
-        min_eval_loss = eval_loss
-
-        # save best model
-        model_path = "tiny_gpy_best_.chkpt"
-        save_model(
-            model_path=model_path,
-            model=model,
-            optimizer=optimizer,
-            epoch=Config.EPOCHS,
-            train_loss=train_loss,
-            eval_loss=eval_loss,
-        )
-
     # Post model Training
     model.generate(tokenizer=tokenizer, max_len=500, device=device)
     model_path = f"tiny_gpy_final_{datetime.now().strftime('%m_%d_%Y_%H_%M_%S')}.chkpt"
     eval_loss = model.eval_model(eval_dataloader=eval_dataloader)
     save_model(
+        version="v2",
         model_path=model_path,
         model=model,
         optimizer=optimizer,
+        global_step=-1,  # last step
         epoch=Config.EPOCHS,
         train_loss=train_loss,
         eval_loss=eval_loss,

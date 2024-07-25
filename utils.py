@@ -19,15 +19,19 @@ def load_text_from_file(file_path: Path) -> List[str]:
 
 
 def save_model(
+    version: str,
     model_path: str,
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     epoch: int,
+    global_step: int,
     train_loss: torch.tensor,
     eval_loss: torch.tensor,
 ):
     model_meta = {
+        "version": version,
         "epoch": epoch,
+        "global_step": global_step,
         "batch_size": Config.BATCH_SIZE,
         "sequence_len": Config.SEQUENCE_LEN,
         "emb_dim": Config.EMB_DIM,

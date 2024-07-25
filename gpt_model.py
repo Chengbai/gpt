@@ -39,6 +39,7 @@ class TinyGPT(nn.Module):
 
     def __init__(
         self,
+        version: str,
         num_embeddings: int,
         embedding_dim: int,
         sequence_length: int,
@@ -47,6 +48,7 @@ class TinyGPT(nn.Module):
         dropout: float,
         device: torch.device = torch.device("cpu"),
     ):
+        assert version
         assert num_embeddings > 0
         assert embedding_dim > 0
         assert sequence_length > 0
@@ -55,6 +57,8 @@ class TinyGPT(nn.Module):
         assert device is not None
 
         super().__init__()
+        self.version = version
+
         # token embeddings
         self.token_embeddings = nn.Embedding(
             num_embeddings=num_embeddings,
@@ -166,6 +170,7 @@ class TinyGPT(nn.Module):
         assert eval_dataloader is not None
         assert writer is not None
 
+        min_eval_loss = float("inf")
         amp_context = self.get_amp_context()
         print(f"steps per Epoch: {len(train_dataloader)}")
         with torch.profiler.profile(
@@ -191,17 +196,10 @@ class TinyGPT(nn.Module):
                     with amp_context:
                         _, train_loss = self(x=x_batch, y=y_batch)
 
-                    if idx % eval_step_interval == 0:
+                    if idx % Config.EVAL_STEP_INTERVAL == 0:
                         eval_loss = self.eval_model(eval_dataloader=eval_dataloader)
                         print(f"train loss: {train_loss}, eval loss: {eval_loss}")
-                        # writer.add_scalar(
-                        #     tag="Loss/train",
-                        #     scalar_value=train_loss,
-                        #     global_step=global_step,
-                        # )
-                        # writer.add_scalar(
-                        #     tag="Loss/eval", scalar_value=eval_loss, global_step=global_step
-                        # )
+
                         writer.add_scalars(
                             main_tag="tiny_gpt",
                             tag_scalar_dict={
@@ -216,6 +214,24 @@ class TinyGPT(nn.Module):
                             device=self.device,
                         )
 
+                        # Save the best model
+                        if eval_loss < min_eval_loss:
+                            # update the running min eval loss
+                            min_eval_loss = eval_loss
+
+                            # save best model
+                            model_path = f"tiny_gpy_best_{self.version}.chkpt"
+                            save_model(
+                                version=self.version,
+                                model_path=model_path,
+                                model=self,
+                                optimizer=optimizer,
+                                epoch=Config.EPOCHS,
+                                global_step=global_step,
+                                train_loss=train_loss,
+                                eval_loss=eval_loss,
+                            )
+
                     optimizer.zero_grad()
                     train_loss.backward()
                     optimizer.step()
@@ -224,10 +240,12 @@ class TinyGPT(nn.Module):
                 # Save epoch model
                 model_path = f"tiny_gpy_{epoch}_{datetime.now(timezone.utc).strftime('%m_%d_%Y_%H_%M_%S')}.chkpt"
                 save_model(
+                    version=self.version,
                     model_path=model_path,
                     model=self,
                     optimizer=optimizer,
                     epoch=epoch,
+                    global_step=global_step,
                     train_loss=train_loss,
                     eval_loss=eval_loss,
                 )
@@ -277,7 +295,8 @@ class TinyGPT(nn.Module):
         for idx, batch_data in tqdm(
             enumerate(eval_dataloader), total=len(eval_dataloader)
         ):
-            if idx > Config.EVAL_SEQUENCE_LENGTH:
+            #
+            if idx > Config.EVAL_BATCHES:
                 break
 
             x_batch, y_batch = batch_data
