@@ -18,7 +18,7 @@ from config import Config
 from dataset import TSDataset
 from data_source import DirectoryTxtDataSource
 from gpt_model import TinyGPT
-from tokenizer import CharTokenizer
+from tokenizer.char_tokenizer import CharTokenizer
 from utils import load_text_from_file, get_prefered_device, save_model, viz_model
 
 
@@ -31,7 +31,7 @@ def run():
     device = get_prefered_device()
 
     # Load txt
-    root_dir = "/Users/chengbai/av"
+    root_dir = "/Users/chengbai/src"
     data_source = DirectoryTxtDataSource(
         dir_path=root_dir, file_patterns=Config.FILE_PATTERNS
     )

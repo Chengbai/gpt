@@ -14,7 +14,7 @@ from config import Config
 from dataset import TSDataset
 from data_source import FileTxtDataSource
 from gpt_model import TinyGPT
-from tokenizer import Tiktoken
+from tokenizer.tiktoken import Tiktoken
 from utils import load_text_from_file, get_prefered_device, save_model, viz_model
 
 # Reproducibility

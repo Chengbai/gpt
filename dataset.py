@@ -3,7 +3,7 @@
 import torch
 
 from torch.utils.data import Dataset, DataLoader
-from tokenizer import BaseTokenizer
+from tokenizer.base_tokenizer import BaseTokenizer
 
 
 class TSDataset(Dataset):

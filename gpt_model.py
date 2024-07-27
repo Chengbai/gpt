@@ -14,7 +14,7 @@ from typing import Tuple
 
 from attention import SelfAttentionBlck
 from config import Config
-from tokenizer import BaseTokenizer
+from tokenizer.base_tokenizer import BaseTokenizer
 from utils import save_model, get_lr
 
 

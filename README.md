@@ -5,12 +5,18 @@
 # Key Concept
 ## tokeniser
  - tiktoken: openAI [BPE](https://en.wikipedia.org/wiki/Byte_pair_encoding) tokeniser: https://github.com/openai/tiktoken
+   - GPT-2: "gpt2"
+   - GPT-4: "cl100k_base"
+   - https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py
  - sentencepiece: google's unsupervised text tokenizer and detokenizer : https://github.com/google/sentencepiece
  - string <-> int
    - string could be char, word, sub-word.
    - int: [0, vocabulary]
    - example: openAI gpt2: https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/encoder.json
-
+- viz tokenizer: https://tiktokenizer.vercel.app/?model=meta-llama%2FMeta-Llama-3-70B
+- References
+   - Let's build the GPT Tokenizer: https://www.youtube.com/watch?v=zduSFxRajkE&t=1711s
+ 
 # batch/mini-batch
 utilize the vector computation, optimize the CPU/GPU/Memory usage, and through put.
 
@@ -44,3 +50,6 @@ multi-dimentional data object.
 
 # References
 - nanoGPT: https://github.com/karpathy/nanoGPT
+- meta-llma: 
+   - https://llama.meta.com/
+   - https://github.com/meta-llama
