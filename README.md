@@ -53,3 +53,9 @@ multi-dimentional data object.
 - meta-llma: 
    - https://llama.meta.com/
    - https://github.com/meta-llama
+
+# Test
+## Test `BasicTokenizer`
+```
+PYTHONPATH=. python tokenizer/basic_tokenizer.py
+```
